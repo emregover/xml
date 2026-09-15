@@ -5,6 +5,16 @@ import { extractEmbeddedXslt, getInvoiceMeta, InvoiceMeta, parseXml, transformIn
 
 type Status = "idle" | "ready" | "error";
 
+function formatMoney(value?: string, currency?: string) {
+  if (!value) return undefined;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return `${value} ${currency ?? ""}`.trim();
+  return `${new Intl.NumberFormat("tr-TR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(number)} ${currency ?? ""}`.trim();
+}
+
 export default function Home() {
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState("");
@@ -24,7 +34,7 @@ export default function Home() {
             ["Para Birimi", meta.currency],
             ["Satıcı", meta.supplier],
             ["Alıcı", meta.customer],
-            ["Ödenecek", meta.payableAmount ? `${meta.payableAmount} ${meta.currency ?? ""}`.trim() : undefined],
+            ["Ödenecek", formatMoney(meta.payableAmount, meta.currency)],
           ].filter((item) => item[1])
         : [],
     [meta]
@@ -48,7 +58,7 @@ export default function Home() {
       const xmlText = await file.text();
       const xml = parseXml(xmlText);
       const xslt = extractEmbeddedXslt(xml);
-      const rendered = transformInvoice(xml, xslt);
+      const rendered = await transformInvoice(xml, xslt);
       setMeta(getInvoiceMeta(xml));
       setHtml(rendered);
       setStatus("ready");
@@ -74,13 +84,37 @@ export default function Home() {
   }
 
   function printInvoice() {
-    const win = window.open("", "_blank", "noopener,noreferrer");
-    if (!win) return;
+    // The rendered HTML is sanitized before it reaches this point. Open the
+    // print document synchronously so popup blockers keep the user gesture.
+    const win = window.open("about:blank", "_blank", "width=980,height=1100");
+    if (!win) {
+      window.alert("Yazdırma penceresi tarayıcı tarafından engellendi. Bu site için açılır pencerelere izin verin.");
+      return;
+    }
+
+    // Prevent the child window from navigating the application window.
+    try {
+      win.opener = null;
+    } catch {
+      // Some browsers expose opener as read-only; the invoice contains no executable scripts.
+    }
+
     win.document.open();
     win.document.write(html);
     win.document.close();
-    win.focus();
-    setTimeout(() => win.print(), 300);
+
+    const triggerPrint = () => {
+      win.focus();
+      window.setTimeout(() => {
+        win.print();
+      }, 180);
+    };
+
+    if (win.document.readyState === "complete") {
+      triggerPrint();
+    } else {
+      win.addEventListener("load", triggerPrint, { once: true });
+    }
   }
 
   return (
