@@ -1,3 +1,5 @@
+import QRCode from "qrcode";
+
 export type InvoiceMeta = {
   id?: string;
   issueDate?: string;
@@ -47,7 +49,7 @@ export function extractEmbeddedXslt(xml: Document): string {
   }
 }
 
-export function transformInvoice(xml: Document, xsltText: string): string {
+export async function transformInvoice(xml: Document, xsltText: string): Promise<string> {
   if (typeof XSLTProcessor === "undefined") {
     throw new Error("Tarayıcınız XSLT dönüşümünü desteklemiyor. Chrome veya Edge deneyin.");
   }
@@ -62,11 +64,37 @@ export function transformInvoice(xml: Document, xsltText: string): string {
   }
 
   const serialized = new XMLSerializer().serializeToString(result);
-  return sanitizeHtml(serialized);
+  return sanitizeAndEnhanceHtml(serialized);
 }
 
-function sanitizeHtml(html: string): string {
+async function sanitizeAndEnhanceHtml(html: string): Promise<string> {
   const doc = new DOMParser().parseFromString(html, "text/html");
+
+  // QNB eSolutions benzeri şablonlar QR'ı script ile oluşturabiliyor.
+  // Fatura scriptini çalıştırmak yerine sadece veri alanını okuyup QR'ı biz üretiyoruz.
+  const qrValue = doc.querySelector("#qrvalue")?.textContent?.trim();
+  const qrHost = doc.querySelector("#qrcode");
+  if (qrValue && qrHost) {
+    try {
+      const svg = await QRCode.toString(qrValue, {
+        type: "svg",
+        errorCorrectionLevel: "M",
+        width: 140,
+        margin: 0,
+      });
+      qrHost.innerHTML = svg;
+      const svgEl = qrHost.querySelector("svg");
+      if (svgEl) {
+        svgEl.setAttribute("width", "140");
+        svgEl.setAttribute("height", "140");
+        svgEl.setAttribute("aria-label", "e-Fatura QR kodu");
+        svgEl.setAttribute("role", "img");
+      }
+    } catch {
+      // QR üretimi başarısız olsa bile faturanın kalanını göstermeye devam et.
+    }
+  }
+
   doc.querySelectorAll("script, iframe, object, embed, base").forEach((el) => el.remove());
 
   doc.querySelectorAll("meta[http-equiv]").forEach((el) => {
@@ -83,6 +111,25 @@ function sanitizeHtml(html: string): string {
       }
     }
   });
+
+  const printStyle = doc.createElement("style");
+  printStyle.textContent = `
+    @page { size: A4 portrait; margin: 0; }
+    @media print {
+      html, body {
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #fff !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .documentContainer,
+      .documentContainerOuter {
+        box-shadow: none !important;
+      }
+    }
+  `;
+  doc.head.appendChild(printStyle);
 
   const head = doc.head.innerHTML;
   const body = doc.body.innerHTML;
