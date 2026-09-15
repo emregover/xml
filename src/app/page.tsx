@@ -2,10 +2,15 @@
 
 import { DragEvent, useEffect, useMemo, useRef, useState } from "react";
 import { extractEmbeddedXslt, getInvoiceMeta, InvoiceMeta, parseXml, transformInvoice } from "@/lib/invoice";
+import {
+  ArchivedInvoice,
+  deleteArchivedInvoice,
+  listArchivedInvoices,
+  saveArchivedInvoice,
+} from "@/lib/archive";
 
 type Status = "idle" | "ready" | "error";
 
-// A4 at CSS 96dpi: 210 x 297 mm ≈ 794 x 1123 px.
 const A4_WIDTH_PX = 794;
 const A4_HEIGHT_PX = 1123;
 
@@ -19,6 +24,13 @@ function formatMoney(value?: string, currency?: string) {
   }).format(number)} ${currency ?? ""}`.trim();
 }
 
+function formatSavedAt(value: number) {
+  return new Intl.DateTimeFormat("tr-TR", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
 export default function Home() {
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState("");
@@ -26,10 +38,11 @@ export default function Home() {
   const [html, setHtml] = useState("");
   const [meta, setMeta] = useState<InvoiceMeta | null>(null);
   const [previewScale, setPreviewScale] = useState(1);
+  const [archive, setArchive] = useState<ArchivedInvoice[]>([]);
+  const [archiveError, setArchiveError] = useState("");
 
   const inputRef = useRef<HTMLInputElement>(null);
   const previewStageRef = useRef<HTMLDivElement>(null);
-  const invoiceFrameRef = useRef<HTMLIFrameElement>(null);
 
   const details = useMemo(
     () =>
@@ -48,6 +61,19 @@ export default function Home() {
     [meta]
   );
 
+  async function refreshArchive() {
+    try {
+      setArchive(await listArchivedInvoices());
+      setArchiveError("");
+    } catch {
+      setArchiveError("Tarayıcı arşivi okunamadı. Gizli mod veya tarayıcı depolama ayarları bunu engelliyor olabilir.");
+    }
+  }
+
+  useEffect(() => {
+    void refreshArchive();
+  }, []);
+
   useEffect(() => {
     if (status !== "ready") return;
     const stage = previewStageRef.current;
@@ -64,37 +90,71 @@ export default function Home() {
     return () => observer.disconnect();
   }, [status]);
 
-  async function openFile(file?: File) {
-    if (!file) return;
+  async function renderXml(xmlText: string, sourceFileName: string, saveToArchive: boolean) {
     setError("");
     setStatus("idle");
     setHtml("");
     setMeta(null);
-    setFileName(file.name);
-
-    if (!file.name.toLowerCase().endsWith(".xml")) {
-      setError("Lütfen .xml uzantılı bir e-Fatura dosyası seçin.");
-      setStatus("error");
-      return;
-    }
+    setFileName(sourceFileName);
 
     try {
-      const xmlText = await file.text();
       const xml = parseXml(xmlText);
       const xslt = extractEmbeddedXslt(xml);
+      const invoiceMeta = getInvoiceMeta(xml);
       const rendered = await transformInvoice(xml, xslt);
-      setMeta(getInvoiceMeta(xml));
+
+      setMeta(invoiceMeta);
       setHtml(rendered);
       setStatus("ready");
+
+      if (saveToArchive) {
+        try {
+          await saveArchivedInvoice({ xmlText, fileName: sourceFileName, meta: invoiceMeta });
+          await refreshArchive();
+        } catch {
+          setArchiveError("Fatura görüntülendi ancak tarayıcı arşivine kaydedilemedi.");
+        }
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Fatura görüntülenemedi.");
       setStatus("error");
     }
   }
 
+  async function openFile(file?: File) {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".xml")) {
+      setError("Lütfen .xml uzantılı bir e-Fatura dosyası seçin.");
+      setStatus("error");
+      return;
+    }
+    await renderXml(await file.text(), file.name, true);
+  }
+
+  function chooseNewInvoice() {
+    if (inputRef.current) inputRef.current.value = "";
+    inputRef.current?.click();
+  }
+
   function onDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     void openFile(event.dataTransfer.files?.[0]);
+  }
+
+  async function openArchivedInvoice(item: ArchivedInvoice) {
+    await renderXml(item.xmlText, item.fileName, false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function removeArchivedInvoice(item: ArchivedInvoice) {
+    const label = item.meta.id || item.fileName;
+    if (!window.confirm(`${label} arşivden silinsin mi?`)) return;
+    try {
+      await deleteArchivedInvoice(item.id);
+      await refreshArchive();
+    } catch {
+      setArchiveError("Fatura arşivden silinemedi.");
+    }
   }
 
   function downloadHtml() {
@@ -110,8 +170,6 @@ export default function Home() {
   function printInvoice() {
     if (!html) return;
 
-    // Use a temporary, same-origin print frame instead of a popup/new tab.
-    // The HTML has already been sanitized, so no invoice-provided script runs.
     const printFrame = document.createElement("iframe");
     printFrame.setAttribute("aria-hidden", "true");
     Object.assign(printFrame.style, {
@@ -139,10 +197,7 @@ export default function Home() {
     printDocument.write(html);
     printDocument.close();
 
-    const cleanup = () => {
-      window.setTimeout(() => printFrame.remove(), 500);
-    };
-
+    const cleanup = () => window.setTimeout(() => printFrame.remove(), 500);
     const runPrint = () => {
       try {
         printWindow.focus();
@@ -152,7 +207,6 @@ export default function Home() {
       }
     };
 
-    // Give embedded data images and stylesheet rules one paint cycle to settle.
     window.setTimeout(runPrint, 180);
   }
 
@@ -160,37 +214,74 @@ export default function Home() {
     <main>
       <section className="hero">
         <div className="badge">UBL-TR · e-Fatura</div>
-        <h1>XML e-Faturayı<br />anında görüntüle.</h1>
-        <p className="lead">
-          XML dosyanızdaki gömülü XSLT şablonunu kullanır. Dosya tarayıcınızdan çıkmaz, sunucuya yüklenmez.
-        </p>
+        <div className="heroRow">
+          <div>
+            <h1>XML e-Faturayı<br />anında görüntüle.</h1>
+            <p className="lead">
+              XML dosyanızdaki gömülü XSLT şablonunu kullanır. Dosya tarayıcınızdan çıkmaz, sunucuya yüklenmez.
+            </p>
+          </div>
+          <button className="newInvoiceButton" onClick={chooseNewInvoice}>+ Yeni XML Fatura Yükle</button>
+        </div>
       </section>
 
       <section className="workspace">
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".xml,text/xml,application/xml"
+          hidden
+          onChange={(event) => void openFile(event.target.files?.[0])}
+        />
+
         <div
           className={`dropzone ${status === "ready" ? "compact" : ""}`}
           onDragOver={(event) => event.preventDefault()}
           onDrop={onDrop}
-          onClick={() => inputRef.current?.click()}
+          onClick={chooseNewInvoice}
           role="button"
           tabIndex={0}
-          onKeyDown={(event) => event.key === "Enter" && inputRef.current?.click()}
+          onKeyDown={(event) => event.key === "Enter" && chooseNewInvoice()}
         >
-          <input
-            ref={inputRef}
-            type="file"
-            accept=".xml,text/xml,application/xml"
-            hidden
-            onChange={(event) => void openFile(event.target.files?.[0])}
-          />
           <div className="uploadIcon" aria-hidden="true">↥</div>
           <div>
             <strong>{fileName || "e-Fatura XML dosyasını bırakın"}</strong>
-            <span>{fileName ? "Değiştirmek için tıklayın" : "veya dosya seçmek için tıklayın"}</span>
+            <span>{fileName ? "Yeni bir XML seçmek için tıklayın" : "veya dosya seçmek için tıklayın"}</span>
           </div>
         </div>
 
+        {archiveError && <div className="archiveWarning">{archiveError}</div>}
         {status === "error" && <div className="errorBox">{error}</div>}
+
+        {archive.length > 0 && (
+          <section className="archiveSection" aria-label="Tarayıcı fatura arşivi">
+            <div className="archiveHeader">
+              <div>
+                <span className="eyebrow">BU TARAYICIDA</span>
+                <h2>Fatura Arşivi</h2>
+              </div>
+              <span className="archiveCount">{archive.length} fatura</span>
+            </div>
+            <div className="archiveList">
+              {archive.map((item) => (
+                <article className={`archiveItem ${meta?.id === item.meta.id ? "active" : ""}`} key={item.id}>
+                  <button className="archiveOpen" onClick={() => void openArchivedInvoice(item)}>
+                    <span className="archiveId">{item.meta.id || item.fileName}</span>
+                    <span className="archiveParties">{item.meta.supplier || "Satıcı"} → {item.meta.customer || "Alıcı"}</span>
+                    <span className="archiveMeta">
+                      {item.meta.issueDate || "Tarih yok"} · {formatMoney(item.meta.payableAmount, item.meta.currency) || "Tutar yok"}
+                    </span>
+                  </button>
+                  <div className="archiveSide">
+                    <span>{formatSavedAt(item.savedAt)}</span>
+                    <button className="deleteArchive" onClick={() => void removeArchivedInvoice(item)} aria-label={`${item.meta.id || item.fileName} arşivden sil`}>Sil</button>
+                  </div>
+                </article>
+              ))}
+            </div>
+            <p className="archiveNote">Arşiv yalnızca bu tarayıcının IndexedDB alanında tutulur. Sunucuya gönderilmez.</p>
+          </section>
+        )}
 
         {status === "ready" && (
           <>
@@ -218,13 +309,9 @@ export default function Home() {
               <div className="previewStage" ref={previewStageRef}>
                 <div
                   className="a4Page"
-                  style={{
-                    width: A4_WIDTH_PX * previewScale,
-                    height: A4_HEIGHT_PX * previewScale,
-                  }}
+                  style={{ width: A4_WIDTH_PX * previewScale, height: A4_HEIGHT_PX * previewScale }}
                 >
                   <iframe
-                    ref={invoiceFrameRef}
                     className="invoiceFrame"
                     title="e-Fatura A4 önizleme"
                     sandbox="allow-same-origin allow-modals"
@@ -244,7 +331,7 @@ export default function Home() {
 
       <footer>
         <span>Dosyalar cihazınızda işlenir.</span>
-        <span>Sunucuya XML veya fatura içeriği gönderilmez.</span>
+        <span>XML içerikleri ve tarayıcı arşivi sunucuya gönderilmez.</span>
       </footer>
     </main>
   );
