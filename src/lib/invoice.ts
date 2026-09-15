@@ -70,8 +70,8 @@ export async function transformInvoice(xml: Document, xsltText: string): Promise
 async function sanitizeAndEnhanceHtml(html: string): Promise<string> {
   const doc = new DOMParser().parseFromString(html, "text/html");
 
-  // QNB eSolutions benzeri şablonlar QR'ı script ile oluşturabiliyor.
-  // Fatura scriptini çalıştırmak yerine sadece veri alanını okuyup QR'ı biz üretiyoruz.
+  // QNB eSolutions benzeri şablonlar QR'ı kendi JavaScript'i ile üretir.
+  // O scripti çalıştırmak yerine yalnızca QR payload'ını okuyup güvenli SVG üretiyoruz.
   const qrValue = doc.querySelector("#qrvalue")?.textContent?.trim();
   const qrHost = doc.querySelector("#qrcode");
   if (qrValue && qrHost) {
@@ -89,12 +89,14 @@ async function sanitizeAndEnhanceHtml(html: string): Promise<string> {
         svgEl.setAttribute("height", "140");
         svgEl.setAttribute("aria-label", "e-Fatura QR kodu");
         svgEl.setAttribute("role", "img");
+        svgEl.style.display = "inline-block";
       }
     } catch {
       // QR üretimi başarısız olsa bile faturanın kalanını göstermeye devam et.
     }
   }
 
+  // Fatura kaynaklı aktif içeriği kaldır. Görüntü ve stil içerikleri korunur.
   doc.querySelectorAll("script, iframe, object, embed, base").forEach((el) => el.remove());
 
   doc.querySelectorAll("meta[http-equiv]").forEach((el) => {
@@ -112,28 +114,97 @@ async function sanitizeAndEnhanceHtml(html: string): Promise<string> {
     }
   });
 
-  const printStyle = doc.createElement("style");
-  printStyle.textContent = `
+  // Şablonun baskı geometrisini ekranda da kullanıyoruz. QNB şablonu baskıda
+  // 845 px genişlik kullanıyor; böylece A4 önizleme ve PDF aynı yerleşimi görür.
+  const viewerStyle = doc.createElement("style");
+  viewerStyle.textContent = `
     @page { size: A4 portrait; margin: 0; }
+
+    @media screen {
+      html, body {
+        width: 845px !important;
+        min-width: 845px !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        color: #000 !important;
+        background: #fff !important;
+        background-image: none !important;
+        text-align: left !important;
+      }
+
+      .documentContainerOuter {
+        width: 845px !important;
+        min-width: 845px !important;
+        max-width: 845px !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #fff !important;
+      }
+
+      .documentContainer {
+        width: 845px !important;
+        min-width: 845px !important;
+        max-width: 845px !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: visible !important;
+        display: block !important;
+        color: #000 !important;
+        background: #fff !important;
+        box-shadow: none !important;
+        -webkit-box-shadow: none !important;
+        -moz-box-shadow: none !important;
+      }
+
+      .documentContainer::before,
+      .documentContainer::after {
+        display: none !important;
+        box-shadow: none !important;
+      }
+
+      #malHizmetTablosu {
+        width: 845px !important;
+      }
+    }
+
     @media print {
       html, body {
         margin: 0 !important;
         padding: 0 !important;
+        color: #000 !important;
         background: #fff !important;
+        background-image: none !important;
+        text-align: left !important;
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
       }
-      .documentContainer,
+
       .documentContainerOuter {
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+
+      .documentContainer {
+        width: 845px !important;
+        min-width: 845px !important;
+        max-width: 845px !important;
+        margin: 0 !important;
+        padding: 0 !important;
         box-shadow: none !important;
+        -webkit-box-shadow: none !important;
+        -moz-box-shadow: none !important;
+      }
+
+      #malHizmetTablosu {
+        width: 845px !important;
       }
     }
   `;
-  doc.head.appendChild(printStyle);
+  doc.head.appendChild(viewerStyle);
 
   const head = doc.head.innerHTML;
   const body = doc.body.innerHTML;
-  return `<!doctype html><html lang="tr"><head><meta charset="utf-8">${head}</head><body>${body}</body></html>`;
+  return `<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=845">${head}</head><body>${body}</body></html>`;
 }
 
 export function getInvoiceMeta(xml: Document): InvoiceMeta {
