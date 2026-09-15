@@ -1,6 +1,6 @@
 {
   "name": "efatura-xml-viewer",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -9,8 +9,8 @@
   },
   "dependencies": {
     "next": "16.3.5",
-    "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
