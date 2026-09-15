@@ -40,14 +40,17 @@ button { border: 0; padding: 12px 16px; border-radius: 3px; cursor: pointer; fon
 button.primary { background: var(--accent); color: white; }
 button.primary:hover { background: var(--accent-dark); }
 button.secondary { background: #ebe7df; color: var(--ink); }
-.previewShell { margin-top: 18px; background: #d8d4cc; border: 1px solid #c7c2b8; box-shadow: 0 28px 70px rgba(0,0,0,.12); }
+.previewShell { margin-top: 18px; background: #d8d4cc; border: 1px solid #c7c2b8; box-shadow: 0 28px 70px rgba(0,0,0,.12); overflow: hidden; }
 .previewTop { height: 40px; display: flex; align-items: center; gap: 7px; padding: 0 14px; background: #2d2d2d; color: #ddd; }
 .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 .dot.red { background: #ff5f57; }
 .dot.yellow { background: #febc2e; }
 .dot.green { background: #28c840; }
-.previewTitle { margin-left: 8px; font-size: 12px; }
-.invoiceFrame { display: block; width: 100%; height: 940px; border: 0; background: white; }
+.previewTitle { margin-left: 8px; font-size: 12px; font-weight: 700; }
+.previewFormat { margin-left: auto; font-size: 11px; color: #aaa; letter-spacing: .04em; }
+.previewStage { width: 100%; min-height: 420px; padding: 28px 16px 38px; display: flex; justify-content: center; align-items: flex-start; overflow: auto; background: linear-gradient(135deg, #d5d2cb 0%, #efede8 55%, #d5d2cb 100%); }
+.a4Page { flex: 0 0 auto; position: relative; background: white; box-shadow: 0 5px 24px rgba(0,0,0,.2); overflow: hidden; transition: width .12s ease, height .12s ease; }
+.invoiceFrame { position: absolute; left: 0; top: 0; display: block; border: 0; background: white; transform-origin: top left; }
 footer { max-width: 1180px; margin: 0 auto; padding: 18px 32px 38px; border-top: 1px solid var(--line); display: flex; gap: 22px; justify-content: space-between; color: var(--muted); font-size: 12px; }
 @media (max-width: 820px) {
   .hero { padding-top: 42px; }
@@ -56,12 +59,7 @@ footer { max-width: 1180px; margin: 0 auto; padding: 18px 32px 38px; border-top:
   .metaGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .actions { width: 100%; }
   .actions button { flex: 1; }
-  .invoiceFrame { height: 760px; }
+  .previewStage { padding-left: 10px; padding-right: 10px; }
+  .previewFormat { display: none; }
   footer { flex-direction: column; gap: 7px; }
-}
-@media print {
-  .hero, .dropzone, .toolbar, footer, .previewTop { display: none !important; }
-  .workspace { padding: 0; }
-  .previewShell { border: 0; box-shadow: none; margin: 0; }
-  .invoiceFrame { height: 100vh; }
 }
