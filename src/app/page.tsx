@@ -1,9 +1,12 @@
 "use client";
 
-import { DragEvent, useMemo, useRef, useState } from "react";
+import { DragEvent, useEffect, useMemo, useRef, useState } from "react";
 import { extractEmbeddedXslt, getInvoiceMeta, InvoiceMeta, parseXml, transformInvoice } from "@/lib/invoice";
 
 type Status = "idle" | "ready" | "error";
+
+const A4_WIDTH_PX = 845;
+const A4_HEIGHT_PX = 1195;
 
 function formatMoney(value?: string, currency?: string) {
   if (!value) return undefined;
@@ -21,7 +24,11 @@ export default function Home() {
   const [fileName, setFileName] = useState("");
   const [html, setHtml] = useState("");
   const [meta, setMeta] = useState<InvoiceMeta | null>(null);
+  const [previewScale, setPreviewScale] = useState(1);
+
   const inputRef = useRef<HTMLInputElement>(null);
+  const previewStageRef = useRef<HTMLDivElement>(null);
+  const invoiceFrameRef = useRef<HTMLIFrameElement>(null);
 
   const details = useMemo(
     () =>
@@ -39,6 +46,22 @@ export default function Home() {
         : [],
     [meta]
   );
+
+  useEffect(() => {
+    if (status !== "ready") return;
+    const stage = previewStageRef.current;
+    if (!stage) return;
+
+    const updateScale = () => {
+      const available = Math.max(280, stage.clientWidth - 32);
+      setPreviewScale(Math.min(1, available / A4_WIDTH_PX));
+    };
+
+    updateScale();
+    const observer = new ResizeObserver(updateScale);
+    observer.observe(stage);
+    return () => observer.disconnect();
+  }, [status]);
 
   async function openFile(file?: File) {
     if (!file) return;
@@ -84,37 +107,16 @@ export default function Home() {
   }
 
   function printInvoice() {
-    // The rendered HTML is sanitized before it reaches this point. Open the
-    // print document synchronously so popup blockers keep the user gesture.
-    const win = window.open("about:blank", "_blank", "width=980,height=1100");
-    if (!win) {
-      window.alert("Yazdırma penceresi tarayıcı tarafından engellendi. Bu site için açılır pencerelere izin verin.");
+    // Print the exact sanitized document shown in the A4 preview. This avoids
+    // popup/new-tab timing issues and guarantees preview/print use one source.
+    const frameWindow = invoiceFrameRef.current?.contentWindow;
+    if (!frameWindow) {
+      window.alert("Fatura önizlemesi henüz hazır değil. Lütfen bir kez daha deneyin.");
       return;
     }
 
-    // Prevent the child window from navigating the application window.
-    try {
-      win.opener = null;
-    } catch {
-      // Some browsers expose opener as read-only; the invoice contains no executable scripts.
-    }
-
-    win.document.open();
-    win.document.write(html);
-    win.document.close();
-
-    const triggerPrint = () => {
-      win.focus();
-      window.setTimeout(() => {
-        win.print();
-      }, 180);
-    };
-
-    if (win.document.readyState === "complete") {
-      triggerPrint();
-    } else {
-      win.addEventListener("load", triggerPrint, { once: true });
-    }
+    frameWindow.focus();
+    window.setTimeout(() => frameWindow.print(), 50);
   }
 
   return (
@@ -173,9 +175,31 @@ export default function Home() {
             <div className="previewShell">
               <div className="previewTop">
                 <span className="dot red" /><span className="dot yellow" /><span className="dot green" />
-                <span className="previewTitle">Fatura Önizleme</span>
+                <span className="previewTitle">A4 Fatura Önizleme</span>
+                <span className="previewFormat">210 × 297 mm</span>
               </div>
-              <iframe className="invoiceFrame" title="e-Fatura önizleme" sandbox="" srcDoc={html} />
+              <div className="previewStage" ref={previewStageRef}>
+                <div
+                  className="a4Page"
+                  style={{
+                    width: A4_WIDTH_PX * previewScale,
+                    height: A4_HEIGHT_PX * previewScale,
+                  }}
+                >
+                  <iframe
+                    ref={invoiceFrameRef}
+                    className="invoiceFrame"
+                    title="e-Fatura A4 önizleme"
+                    sandbox="allow-same-origin"
+                    srcDoc={html}
+                    style={{
+                      width: A4_WIDTH_PX,
+                      height: A4_HEIGHT_PX,
+                      transform: `scale(${previewScale})`,
+                    }}
+                  />
+                </div>
+              </div>
             </div>
           </>
         )}
