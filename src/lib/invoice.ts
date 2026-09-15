@@ -114,22 +114,34 @@ async function sanitizeAndEnhanceHtml(html: string): Promise<string> {
     }
   });
 
-  // Şablonun baskı geometrisini ekranda da kullanıyoruz. QNB şablonu baskıda
-  // 845 px genişlik kullanıyor; böylece A4 önizleme ve PDF aynı yerleşimi görür.
+  // Kaynak XSLT yaklaşık 845 px genişlikte düzenlenmiş. Gerçek A4 genişliği
+  // CSS 96 dpi'de yaklaşık 794 px. 10 mm kenar payı bırakınca kullanılabilir
+  // alan yaklaşık 718 px olur; 845 px şablon için ölçek 0.85'tir.
   const viewerStyle = doc.createElement("style");
   viewerStyle.textContent = `
-    @page { size: A4 portrait; margin: 0; }
+    @page {
+      size: A4 portrait;
+      margin: 10mm;
+    }
 
     @media screen {
       html, body {
-        width: 845px !important;
-        min-width: 845px !important;
+        width: 794px !important;
+        min-width: 794px !important;
+        height: 1123px !important;
+        min-height: 1123px !important;
         margin: 0 !important;
         padding: 0 !important;
         color: #000 !important;
         background: #fff !important;
         background-image: none !important;
         text-align: left !important;
+        overflow: hidden !important;
+      }
+
+      body {
+        box-sizing: border-box !important;
+        padding: 38px !important;
       }
 
       .documentContainerOuter {
@@ -139,6 +151,7 @@ async function sanitizeAndEnhanceHtml(html: string): Promise<string> {
         margin: 0 !important;
         padding: 0 !important;
         background: #fff !important;
+        zoom: .85 !important;
       }
 
       .documentContainer {
@@ -169,19 +182,29 @@ async function sanitizeAndEnhanceHtml(html: string): Promise<string> {
 
     @media print {
       html, body {
+        width: auto !important;
+        min-width: 0 !important;
+        height: auto !important;
+        min-height: 0 !important;
         margin: 0 !important;
         padding: 0 !important;
         color: #000 !important;
         background: #fff !important;
         background-image: none !important;
         text-align: left !important;
+        overflow: visible !important;
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
       }
 
       .documentContainerOuter {
+        width: 845px !important;
+        min-width: 845px !important;
+        max-width: 845px !important;
         margin: 0 !important;
         padding: 0 !important;
+        background: #fff !important;
+        zoom: .85 !important;
       }
 
       .documentContainer {
@@ -204,7 +227,7 @@ async function sanitizeAndEnhanceHtml(html: string): Promise<string> {
 
   const head = doc.head.innerHTML;
   const body = doc.body.innerHTML;
-  return `<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=845">${head}</head><body>${body}</body></html>`;
+  return `<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=794">${head}</head><body>${body}</body></html>`;
 }
 
 export function getInvoiceMeta(xml: Document): InvoiceMeta {
