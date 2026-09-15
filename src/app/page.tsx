@@ -5,8 +5,9 @@ import { extractEmbeddedXslt, getInvoiceMeta, InvoiceMeta, parseXml, transformIn
 
 type Status = "idle" | "ready" | "error";
 
-const A4_WIDTH_PX = 845;
-const A4_HEIGHT_PX = 1195;
+// A4 at CSS 96dpi: 210 x 297 mm ≈ 794 x 1123 px.
+const A4_WIDTH_PX = 794;
+const A4_HEIGHT_PX = 1123;
 
 function formatMoney(value?: string, currency?: string) {
   if (!value) return undefined;
@@ -107,16 +108,52 @@ export default function Home() {
   }
 
   function printInvoice() {
-    // Print the exact sanitized document shown in the A4 preview. This avoids
-    // popup/new-tab timing issues and guarantees preview/print use one source.
-    const frameWindow = invoiceFrameRef.current?.contentWindow;
-    if (!frameWindow) {
-      window.alert("Fatura önizlemesi henüz hazır değil. Lütfen bir kez daha deneyin.");
+    if (!html) return;
+
+    // Use a temporary, same-origin print frame instead of a popup/new tab.
+    // The HTML has already been sanitized, so no invoice-provided script runs.
+    const printFrame = document.createElement("iframe");
+    printFrame.setAttribute("aria-hidden", "true");
+    Object.assign(printFrame.style, {
+      position: "fixed",
+      width: "1px",
+      height: "1px",
+      right: "100%",
+      bottom: "0",
+      border: "0",
+      opacity: "0",
+      pointerEvents: "none",
+    });
+
+    document.body.appendChild(printFrame);
+    const printWindow = printFrame.contentWindow;
+    const printDocument = printFrame.contentDocument;
+
+    if (!printWindow || !printDocument) {
+      printFrame.remove();
+      window.alert("Yazdırma penceresi hazırlanamadı. Lütfen tekrar deneyin.");
       return;
     }
 
-    frameWindow.focus();
-    window.setTimeout(() => frameWindow.print(), 50);
+    printDocument.open();
+    printDocument.write(html);
+    printDocument.close();
+
+    const cleanup = () => {
+      window.setTimeout(() => printFrame.remove(), 500);
+    };
+
+    const runPrint = () => {
+      try {
+        printWindow.focus();
+        printWindow.print();
+      } finally {
+        cleanup();
+      }
+    };
+
+    // Give embedded data images and stylesheet rules one paint cycle to settle.
+    window.setTimeout(runPrint, 180);
   }
 
   return (
@@ -176,7 +213,7 @@ export default function Home() {
               <div className="previewTop">
                 <span className="dot red" /><span className="dot yellow" /><span className="dot green" />
                 <span className="previewTitle">A4 Fatura Önizleme</span>
-                <span className="previewFormat">210 × 297 mm</span>
+                <span className="previewFormat">210 × 297 mm · 10 mm kenar boşluğu</span>
               </div>
               <div className="previewStage" ref={previewStageRef}>
                 <div
@@ -190,7 +227,7 @@ export default function Home() {
                     ref={invoiceFrameRef}
                     className="invoiceFrame"
                     title="e-Fatura A4 önizleme"
-                    sandbox="allow-same-origin"
+                    sandbox="allow-same-origin allow-modals"
                     srcDoc={html}
                     style={{
                       width: A4_WIDTH_PX,
